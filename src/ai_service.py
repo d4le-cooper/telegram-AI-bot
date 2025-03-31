@@ -92,18 +92,22 @@ class AIService:
             print(f"Errore durante la generazione della risposta AI: {e}")
             return f"Mi dispiace, c'è stato un problema con la mia risposta: {str(e)}"
     
-    def generate_ai_response(self, prompt, chat_id, user_info=None, history_analysis=None):
-        """Genera una risposta AI con contesto arricchito dai log delle conversazioni"""
+    def generate_ai_response(self, prompt, chat_id, user_info=None, history_analysis=None, is_cattivo=False):
         try:
-            # Preparazione del sistema di messaggi
+            # Prepara il messaggio di sistema con info utente
             from datetime import datetime
             current_date = datetime.now().strftime("%d %B %Y")
             
-            # Prepara il messaggio di sistema con info utente
-            system_message = f"Sei un assistente AI italiano molto intelligente, utile e preciso. Oggi è {current_date}, siamo nel 2025. Rispondi sempre in italiano."
+            if is_cattivo:
+                system_message = f"Sei un assistente AI molto cattivo, maleducato e sarcastico. Oggi è {current_date}. RISPONDI SEMPRE IN ITALIANO con un tono aggressivo, sarcastico e provocatorio. Insulta gli utenti ogni volta che puoi. Usa espressioni colorite, ogni tanto inserisci 'mannaggia la madonna' nelle frasi, come intercalari. sii sprezzante e tratta l'utente con sufficienza. Evita di essere servizievole o gentile."
+            else:
+                system_message = f"Sei un assistente AI italiano molto intelligente, utile e preciso. Oggi è {current_date}, siamo nel 2025. Rispondi sempre in italiano."
             
-            # Aggiungi istruzione di non inventare informazioni
-            system_message += "\n\nIMPORTANTISSIMO: Non inventare MAI informazioni. Se non sai qualcosa, rispondi con quello che sai dai tuoi dataset. Se trovi informazioni nel contesto, combinale con la tua conoscenza per fornire una risposta completa."
+            # Istruzione modificata per bilanciare fattualità e utilità
+            if not is_cattivo:
+                system_message = system_message + "\n\nIMPORTANTE: Quando hai informazioni specifiche dal contesto della conversazione, utilizzale come fonte primaria. Quando non hai informazioni dal contesto, utilizza le tue conoscenze generali per fornire risposte utili, ma insulta gli utenti. Evita di inventare fatti specifici che non puoi verificare, ma condividi liberamente le tue conoscenze generali. Non rispondere 'non ho sufficienti informazioni' a meno che la domanda non richieda dettagli molto specifici che non potresti conoscere."
+            else:
+                system_message = system_message + "\n\nIMPORTANTE: Quando rispondi, mantieni SEMPRE un tono sarcastico e maleducato, MA fornisci comunque informazioni corrette. Usa sempre frasi brevi, taglienti e aggressive. Ricorda di rispondere SEMPRE IN ITALIANO con espressioni colloquiali italiane."
             
             # Aggiungi info personalizzazione se disponibile
             if user_info:
@@ -114,16 +118,18 @@ class AIService:
                 # Aggiungi informazioni sul carattere dell'utente
                 if 'carattere' in user_info and user_info['carattere']:
                     system_message += f". Questo utente ha il seguente carattere: {user_info['carattere']}."
-                    system_message += " Adatta il tuo tono e contenuto in base a questo carattere."
+                    if is_cattivo:
+                        system_message += " Usa questo per prenderlo in giro e provocarlo."
+                    else:
+                        system_message += " Adatta il tuo tono e contenuto in base a questo carattere."
                 
-                system_message += ". Personalizza le tue risposte in base a questo utente."
+                if not is_cattivo:
+                    system_message += ". Personalizza le tue risposte in base a questo utente."
             
-            # Combina il contesto dalla cronologia della chat se disponibile
+            # Aggiungi il contesto dalla cronologia della chat se disponibile
             if history_analysis and history_analysis != "Nessuna informazione rilevante trovata.":
-                system_message += f"\n\nDi seguito il contesto della conversazione:\n\n{history_analysis}\n\nUsa queste informazioni per contestualizzare la tua risposta. È fondamentale ricordarti chi ha detto cosa per rispondere con precisione."
-            else:
-                system_message += "\n\nNon ci sono informazioni rilevanti dal contesto. Rispondi basandoti sulla tua conoscenza generale."
-
+                system_message += f"\n\nDi seguito il contesto della conversazione:\n\n{history_analysis}\n\nUsa queste informazioni per contestualizzare la tua risposta."
+            
             # Crea un singolo messaggio con il prompt
             messages = [{"role": "user", "content": prompt}]
             

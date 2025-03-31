@@ -3,7 +3,7 @@ import telebot
 import threading
 import time
 from datetime import datetime
-from config import BOT_TOKEN
+from config import BOT_TOKEN, SKIP_INITIAL_CHARACTER_ANALYSIS
 from logger import MessageLogger
 from data_manager import DataManager
 from ai_service import AIService
@@ -13,6 +13,9 @@ bot = telebot.TeleBot(BOT_TOKEN)
 logger = MessageLogger()
 data_manager = DataManager()
 ai_service = AIService()
+
+# Stato "cattivo" per ciascuna chat
+cattivo_mode = {}
 
 # Carica i dati salvati PRIMA di usarli
 print("Caricamento dati precedenti...")
@@ -42,33 +45,27 @@ for chat_id in user_data.keys():
 
 # Estrai gli utenti dai log e integra con i dati esistenti
 print("Estrazione utenti dai log...")
-log_users = logger.extract_users_from_logs()
 users_from_logs = 0
 characters_from_logs = 0
-
-# Estrai i messaggi dagli utenti per analizzare il loro carattere
-print("Analisi messaggi dai log per determinare il carattere degli utenti...")
+log_users = logger.extract_users_from_logs()
 log_messages = logger.extract_messages_from_logs()
 
+# Integra gli utenti dai log nella struttura principale
 for chat_id, users in log_users.items():
+    # Crea la chat se non esiste
     if chat_id not in user_data:
         user_data[chat_id] = {}
-    
+        
     for user_id, user_info in users.items():
-        is_new_user = user_id not in user_data[chat_id]
-        
-        # Aggiungiamo un nuovo utente dai log o aggiorniamo dati mancanti
-        if is_new_user:
+        users_from_logs += 1
+        # Aggiungi l'utente se non esiste
+        if user_id not in user_data[chat_id]:
             user_data[chat_id][user_id] = user_info
-            users_from_logs += 1
-        else:
-            # L'utente esiste già, ma potrebbe essere utile aggiornare alcuni campi
-            for key, value in user_info.items():
-                if key not in user_data[chat_id][user_id] or not user_data[chat_id][user_id][key]:
-                    user_data[chat_id][user_id][key] = value
         
-        # Controlla se abbiamo messaggi per questo utente per analizzare il carattere
-        if ('carattere' not in user_data[chat_id][user_id] and 
+        # Analizza il carattere se ci sono abbastanza messaggi e non è già analizzato
+        # E SOLO SE l'analisi iniziale non è disabilitata
+        if (not SKIP_INITIAL_CHARACTER_ANALYSIS and
+            'carattere' not in user_data[chat_id][user_id] and 
             chat_id in log_messages and 
             user_id in log_messages[chat_id] and 
             len(log_messages[chat_id][user_id]) >= 5):
@@ -143,6 +140,10 @@ def character_analysis_thread():
     """Thread per analizzare il carattere degli utenti ogni 30 minuti"""
     global user_data
     
+    if SKIP_INITIAL_CHARACTER_ANALYSIS:
+        print("Analisi iniziale dei caratteri disattivata. Prima analisi tra 30 minuti...")
+        time.sleep(1800)  # Dormi per 30 minuti prima della prima analisi
+    
     print("Avviato thread di analisi del carattere...")
     while True:
         try:
@@ -188,7 +189,6 @@ def character_analysis_thread():
             # Salva i dati dopo l'analisi
             data_manager.save_user_data(user_data)
             
-            # Attendi 30 minuti
             print("Analisi completata. Prossima analisi tra 30 minuti.")
             time.sleep(1800)  # 30 minuti in secondi
         except Exception as e:
@@ -202,6 +202,12 @@ context_thread.start()
 # Avvia il thread per l'analisi del carattere
 character_thread = threading.Thread(target=character_analysis_thread, daemon=True)
 character_thread.start()
+
+# Log informativo
+if SKIP_INITIAL_CHARACTER_ANALYSIS:
+    print("Analisi iniziale dei caratteri disattivata - verrà eseguita dopo 30 minuti")
+else:
+    print("Analisi iniziale dei caratteri attiva")
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -307,6 +313,18 @@ def view_logs(message):
         logs_text += f"- {log['timestamp']}: {log['user_first_name']} in {log['chat_type']}: {log['text'][:30]}...\n"
     
     bot.reply_to(message, logs_text)
+
+@bot.message_handler(commands=['cattivo'])
+def toggle_cattivo_mode(message):
+    logger.log_message(message)
+    chat_id = message.chat.id
+    
+    cattivo_mode[chat_id] = not cattivo_mode.get(chat_id, False)
+    
+    if cattivo_mode[chat_id]:
+        bot.reply_to(message, "Modalità cattiva attivata. Ora sarò terribilmente maleducato. 😈")
+    else:
+        bot.reply_to(message, "Modalità cattiva disattivata. Torno ad essere gentile. 🙂")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
@@ -419,7 +437,13 @@ def handle_message(message):
                     combined_context += f"INFORMAZIONI RILEVANTI PER LA DOMANDA ATTUALE:\n{history_analysis}"
                 
                 # Genera la risposta AI usando la cronologia come contesto aggiuntivo
-                response = ai_service.generate_ai_response(prompt if prompt else message.text, chat_id, user_info, combined_context)
+                response = ai_service.generate_ai_response(
+                    prompt if prompt else message.text, 
+                    chat_id, 
+                    user_info, 
+                    combined_context,
+                    is_cattivo=cattivo_mode.get(chat_id, False)
+                )
                 bot.reply_to(message, response)
             else:
                 print("Bot non menzionato in questo messaggio")
@@ -441,7 +465,13 @@ def handle_message(message):
                 history_analysis = ai_service.analyze_message_history(chat_history, message.text)
                 print(f"Contesto rilevante trovato: {history_analysis[:100]}...")
             
-            response = ai_service.generate_ai_response(message.text, chat_id, user_info, history_analysis)
+            response = ai_service.generate_ai_response(
+                message.text, 
+                chat_id, 
+                user_info, 
+                history_analysis,
+                is_cattivo=cattivo_mode.get(chat_id, False)
+            )
             bot.reply_to(message, response)
     except Exception as e:
         print(f"Errore durante l'elaborazione del messaggio: {e}")
