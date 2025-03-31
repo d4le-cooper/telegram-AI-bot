@@ -14,14 +14,31 @@ logger = MessageLogger()
 data_manager = DataManager()
 ai_service = AIService()
 
-# Cache per il contesto delle chat
-chat_context_cache = {}
-
-# Carica i dati salvati
+# Carica i dati salvati PRIMA di usarli
 print("Caricamento dati precedenti...")
 user_data = data_manager.load_user_data()
 conversation_history = data_manager.load_conversations()
 log_count = logger.load_logs()
+
+# Cache per il contesto delle chat
+chat_context_cache = {}
+
+# Carica i contesti salvati precedentemente (DOPO aver caricato user_data)
+print("Caricamento contesti salvati...")
+for chat_id in user_data.keys():
+    context_file = f"data/context_cache_{chat_id}.txt"
+    if os.path.exists(context_file):
+        try:
+            with open(context_file, "r", encoding="utf-8") as f:
+                context_text = f.read()
+                chat_context_cache[chat_id] = {
+                    "last_update": datetime.fromtimestamp(os.path.getmtime(context_file)),
+                    "context": context_text,
+                    "message_count": len(context_text.split("\n"))
+                }
+            print(f"Caricato contesto salvato per chat {chat_id}")
+        except Exception as e:
+            print(f"Errore nel caricamento del contesto per chat {chat_id}: {e}")
 
 # Estrai gli utenti dai log e integra con i dati esistenti
 print("Estrazione utenti dai log...")
@@ -108,21 +125,83 @@ def context_update_thread():
                         "context": context_analysis,
                         "message_count": len(chat_history)
                     }
+                    # Salva anche su disco per persistenza tra riavvii
+                    with open(f"data/context_cache_{chat_id}.txt", "w", encoding="utf-8") as f:
+                        f.write(context_analysis)
                     print(f"Contesto aggiornato per chat {chat_id}: {context_analysis[:100]}...")
                 except Exception as e:
                     print(f"Errore durante l'analisi del contesto per la chat {chat_id}: {e}")
             
-            # Dormi per 2 minuti
-            time.sleep(120)
+            # Dormi per 30 minuti (modificato da 2 minuti)
+            time.sleep(1800)
         except Exception as e:
             print(f"Errore nel thread di aggiornamento contesto: {e}")
             time.sleep(30)  # Riprova dopo 30 secondi in caso di errore
 
+# Thread per analizzare il carattere degli utenti periodicamente
+def character_analysis_thread():
+    """Thread per analizzare il carattere degli utenti ogni 30 minuti"""
+    global user_data
+    
+    print("Avviato thread di analisi del carattere...")
+    while True:
+        try:
+            print("\n--- Analisi periodica del carattere degli utenti ---")
+            # Per ogni chat conosciuta
+            for chat_id in user_data.keys():
+                # Recupera tutti i messaggi della chat
+                chat_history = logger.get_chat_message_history(chat_id)
+                
+                if not chat_history:
+                    continue
+                
+                print(f"Analizzando caratteri nella chat {chat_id} con {len(chat_history)} messaggi...")
+                
+                # Raggruppa i messaggi per utente
+                user_messages = {}
+                for msg in chat_history:
+                    user_id = msg['user_id']
+                    if user_id not in user_messages:
+                        user_messages[user_id] = []
+                    user_messages[user_id].append(msg['text'])
+                
+                # Analizza il carattere di ogni utente
+                for user_id, messages in user_messages.items():
+                    # Verifica che ci siano abbastanza messaggi per l'analisi
+                    if len(messages) < 5:
+                        continue
+                    
+                    # Verifica che l'utente sia nel database
+                    if user_id not in user_data[chat_id]:
+                        continue
+                    
+                    user_info = user_data[chat_id][user_id]
+                    try:
+                        print(f"Analisi carattere di {user_info['first_name']} ({len(messages)} messaggi)...")
+                        carattere = ai_service.analyze_user_character(messages)
+                        if carattere:
+                            user_data[chat_id][user_id]['carattere'] = carattere
+                            print(f"Carattere aggiornato: {carattere[:50]}...")
+                    except Exception as e:
+                        print(f"Errore nell'analisi del carattere: {e}")
+            
+            # Salva i dati dopo l'analisi
+            data_manager.save_user_data(user_data)
+            
+            # Attendi 30 minuti
+            print("Analisi completata. Prossima analisi tra 30 minuti.")
+            time.sleep(1800)  # 30 minuti in secondi
+        except Exception as e:
+            print(f"Errore nel thread di analisi del carattere: {e}")
+            time.sleep(300)  # 5 minuti in caso di errore
 
 # Avvia il thread per l'aggiornamento del contesto
 context_thread = threading.Thread(target=context_update_thread, daemon=True)
 context_thread.start()
 
+# Avvia il thread per l'analisi del carattere
+character_thread = threading.Thread(target=character_analysis_thread, daemon=True)
+character_thread.start()
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -274,29 +353,6 @@ def handle_message(message):
         # Limita la cronologia a 100 messaggi
         if len(conversation_history[chat_id]) > 100:
             conversation_history[chat_id] = conversation_history[chat_id][-100:]
-        
-        # Analizziamo il carattere dopo un certo numero di messaggi
-        # Controlla se abbiamo almeno 5 messaggi nella cronologia e il carattere non è stato aggiornato di recente
-        if message.text and len(message.text) > 5:
-            # Conteggio messaggi dell'utente
-            user_messages = []
-            for msg in conversation_history[chat_id]:
-                if "user_info" in msg and msg["user_info"]["id"] == user_id:
-                    user_messages.append(msg["content"])
-            
-            # Se l'utente ha inviato almeno 5 messaggi o non ha un carattere definito
-            # e il testo non è un comando
-            if (len(user_messages) >= 5 or 'carattere' not in user_info) and not message.text.startswith('/'):
-                # Controlla se è il momento di aggiornare il carattere (ogni 10 messaggi o se non esiste)
-                should_update = 'carattere' not in user_info or len(user_messages) % 10 == 0
-                
-                if should_update:
-                    print(f"Analizzando il carattere dell'utente {message.from_user.first_name}...")
-                    # Modifica qui: passa solo i messaggi dell'utente
-                    carattere = ai_service.analyze_user_character(user_messages)
-                    if carattere:
-                        user_data[chat_id][user_id]['carattere'] = carattere
-                        print(f"Carattere aggiornato: {carattere}")
         
         # Lista di parole chiave da monitorare
         keywords = ["gaetano", "gae", "gboipelo"]

@@ -278,6 +278,7 @@ class MessageLogger:
     def get_chat_message_history(self, chat_id):
         """Estrae tutti i messaggi di una chat specifica dai log, organizzati per utente"""
         chat_messages = []
+        messages_count = 0
         
         # Controlla se la directory esiste
         if not os.path.exists(self.log_dir):
@@ -289,6 +290,9 @@ class MessageLogger:
             if file.startswith("telegram_log_") and file.endswith(".jsonl"):
                 log_files.append(os.path.join(self.log_dir, file))
         
+        # Ordina i file di log per data (più recenti prima)
+        log_files.sort(reverse=True)
+        
         # Processa ogni file di log
         for log_file in log_files:
             try:
@@ -298,9 +302,9 @@ class MessageLogger:
                             log_entry = json.loads(line)
                             
                             # Controlla se il messaggio è della chat specifica
+                            # Includi TUTTI i messaggi, anche i comandi (rimuovendo il filtro)
                             if (log_entry.get("chat_id") == chat_id and 
-                                log_entry.get("text") and 
-                                not log_entry.get("text").startswith('/')):  # Ignora i comandi
+                                log_entry.get("text")):
                                 
                                 # Aggiungi il messaggio con informazioni complete
                                 chat_messages.append({
@@ -310,6 +314,7 @@ class MessageLogger:
                                     "username": log_entry.get("username", ""),
                                     "text": log_entry.get("text", "")
                                 })
+                                messages_count += 1
                                 
                         except json.JSONDecodeError:
                             continue
@@ -319,5 +324,7 @@ class MessageLogger:
         
         # Ordina i messaggi per timestamp
         chat_messages.sort(key=lambda x: x["timestamp"])
+        
+        print(f"Estratti {messages_count} messaggi totali dalla chat {chat_id}")
         
         return chat_messages
