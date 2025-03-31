@@ -59,10 +59,10 @@ class AIService:
             if not system_message:
                 from datetime import datetime
                 current_date = datetime.now().strftime("%d %B %Y")
-                system_message = f"Sei un assistente AI italiano molto intelligente, utile e preciso. Oggi è {current_date}, siamo nel 2025. Rispondi sempre in italiano."
+                system_message = f"Sei un assistente AI italiano molto intelligente, utile e preciso. Oggi è {current_date}, siamo nel 2025."
             
-            # Aggiungi istruzioni per risposte fattuali
-            system_message = system_message + "\n\nIMPORTANTE: Fornisci solo informazioni fattuali e verificabili. Se non conosci la risposta o non sei sicuro, ammettilo chiaramente dicendo 'Non ho informazioni sufficienti su questo' invece di inventare dettagli. Evita speculazioni e sii conciso nelle tue risposte."
+            # Aggiungi istruzioni esplicite per risposte fattuali
+            system_message = system_message + "\n\nIMPORTANTISSIMO: Non inventare MAI informazioni. Se non conosci qualcosa o non è stato menzionato esplicitamente nei messaggi precedenti, rispondi 'Non ho sufficienti informazioni su questo argomento' invece di inventare. Non fare mai assunzioni non supportate dai dati. Fornisci SOLO informazioni FATTUALI che sono state effettivamente menzionate nella conversazione."
             
             payload_messages = [{"role": "system", "content": system_message}]
             payload_messages.extend(messages)
@@ -72,9 +72,9 @@ class AIService:
                 "messages": payload_messages,
                 "stream": False,
                 "options": {
-                    "temperature": 0.3,  # Ridotta da 0.7 a 0.3 per risposte più conservative
-                    "num_predict": 300,  # Ridotta da 500 a 300 per risposte più concise
-                    "top_p": 0.8        # Aggiunto per ridurre la creatività
+                    "temperature": 0.2,  # Ridotta drasticamente per risposte più conservative
+                    "num_predict": 250,  # Ridotta per risposte più concise
+                    "top_p": 0.7        # Ridotto per diminuire la creatività
                 }
             }
             
@@ -102,9 +102,12 @@ class AIService:
             # Prepara il messaggio di sistema con info utente
             system_message = f"Sei un assistente AI italiano molto intelligente, utile e preciso. Oggi è {current_date}, siamo nel 2025. Rispondi sempre in italiano."
             
+            # Aggiungi istruzione di non inventare informazioni
+            system_message += "\n\nIMPORTANTISSIMO: Non inventare MAI informazioni. Se non sai qualcosa o non è stato menzionato nei messaggi precedenti, ammettilo chiaramente. Non fare assunzioni non supportate dai dati. Rispondi SOLO con informazioni che puoi verificare nel contesto fornito."
+            
             # Aggiungi info personalizzazione se disponibile
             if user_info:
-                system_message += f" Stai parlando con {user_info['first_name']}"
+                system_message += f"\n\nStai parlando con {user_info['first_name']}"
                 if user_info.get('username'):
                     system_message += f" (@{user_info['username']})"
                 
@@ -117,7 +120,7 @@ class AIService:
                 
             # Aggiungi il contesto dalla cronologia della chat se disponibile
             if history_analysis and history_analysis != "Nessuna informazione rilevante trovata.":
-                system_message += f"\n\nContesto della conversazione in questa chat: {history_analysis}\n\nUsa queste informazioni per contestualizzare la tua risposta e ricordati di chi ha detto cosa quando è rilevante, ma senza menzionare esplicitamente che stai usando informazioni dei messaggi precedenti."
+                system_message += f"\n\nDi seguito il contesto della conversazione:\n\n{history_analysis}\n\nUsa queste informazioni per contestualizzare la tua risposta. È fondamentale ricordarti chi ha detto cosa per rispondere con precisione. Non inventare informazioni che non sono presenti in questo contesto."
             
             # Crea un singolo messaggio con il prompt
             messages = [{"role": "user", "content": prompt}]
@@ -178,4 +181,60 @@ class AIService:
             
         except Exception as e:
             print(f"Errore durante l'analisi della cronologia chat: {e}")
+            return "Nessuna informazione rilevante trovata."
+    
+    def analyze_chat_context(self, chat_messages):
+        """Analizza l'intera chat per creare un contesto comprensivo"""
+        try:
+            # Usa più messaggi possibile, ma limita per evitare sovraccarichi
+            # Prendi gli ultimi 100 messaggi per l'analisi
+            recent_messages = chat_messages[-100:] if len(chat_messages) > 100 else chat_messages
+            
+            # Costruisci la rappresentazione della cronologia
+            messages_text = []
+            for msg in recent_messages:
+                messages_text.append(f"- {msg['timestamp']}: {msg['user_name']} (@{msg['username'] if msg['username'] else 'no-username'}): {msg['text']}")
+            
+            messages_history = "\n".join(messages_text)
+            
+            prompt = f"""
+            Analizza questa cronologia di messaggi della chat e crea un riassunto FATTUALE di cosa è stato discusso.
+            
+            Per ogni utente nella chat, identifica:
+            1. Quali argomenti ha discusso
+            2. Quali opinioni ha espresso
+            3. Quali informazioni fattuali ha condiviso
+            
+            Cronologia della chat:
+            {messages_history}
+            
+            Fornisci un riassunto COMPLETO (massimo 500 parole) che catturi solo informazioni FATTUALI ed ESPLICITE dalla conversazione.
+            Organizza il tuo riassunto per utente, così che sia chiaro chi ha detto cosa.
+            Non aggiungere interpretazioni o speculazioni, solo fatti menzionati esplicitamente.
+            """
+            
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": "Sei un assistente analitico ESTREMAMENTE PRECISO che deve creare un riassunto fattuale di una conversazione. Non inventare MAI dettagli e menziona esplicitamente chi ha detto cosa."},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.3
+                }
+            }
+            
+            # Effettua la chiamata API
+            response = requests.post(self.api_url, json=payload)
+            response.raise_for_status()
+            
+            # Estrai la risposta
+            result = response.json()
+            analysis = result["message"]["content"]
+            
+            return analysis
+            
+        except Exception as e:
+            print(f"Errore durante l'analisi del contesto chat: {e}")
             return "Nessuna informazione rilevante trovata."

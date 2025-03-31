@@ -14,6 +14,9 @@ logger = MessageLogger()
 data_manager = DataManager()
 ai_service = AIService()
 
+# Cache per il contesto delle chat
+chat_context_cache = {}
+
 # Carica i dati salvati
 print("Caricamento dati precedenti...")
 user_data = data_manager.load_user_data()
@@ -77,6 +80,49 @@ def auto_save_thread():
 
 save_thread = threading.Thread(target=auto_save_thread, daemon=True)
 save_thread.start()
+
+# Thread per aggiornare periodicamente il contesto dai log
+def context_update_thread():
+    """Thread per aggiornare periodicamente il contesto dalle chat dai log"""
+    global chat_context_cache
+    
+    print("Avviato thread di aggiornamento contesto...")
+    while True:
+        try:
+            print("\n--- Aggiornamento contesto dalle chat ---")
+            # Aggiorna il contesto per ogni chat conosciuta
+            for chat_id in user_data.keys():
+                # Recupera la cronologia messaggi dell'intera chat
+                chat_history = logger.get_chat_message_history(chat_id)
+                
+                if not chat_history:
+                    continue
+                
+                print(f"Analisi di {len(chat_history)} messaggi nella chat {chat_id} per contesto...")
+                # Usa un prompt generico per l'analisi del contesto
+                try:
+                    context_analysis = ai_service.analyze_chat_context(chat_history)
+                    # Salva il contesto analizzato nella cache
+                    chat_context_cache[chat_id] = {
+                        "last_update": datetime.now(),
+                        "context": context_analysis,
+                        "message_count": len(chat_history)
+                    }
+                    print(f"Contesto aggiornato per chat {chat_id}: {context_analysis[:100]}...")
+                except Exception as e:
+                    print(f"Errore durante l'analisi del contesto per la chat {chat_id}: {e}")
+            
+            # Dormi per 2 minuti
+            time.sleep(120)
+        except Exception as e:
+            print(f"Errore nel thread di aggiornamento contesto: {e}")
+            time.sleep(30)  # Riprova dopo 30 secondi in caso di errore
+
+
+# Avvia il thread per l'aggiornamento del contesto
+context_thread = threading.Thread(target=context_update_thread, daemon=True)
+context_thread.start()
+
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
@@ -292,6 +338,15 @@ def handle_message(message):
                 print(f"Recupero della cronologia messaggi della chat {message.chat.id}...")
                 chat_history = logger.get_chat_message_history(chat_id)
                 
+                # Usa il contesto memorizzato se disponibile e aggiornato
+                cached_context = None
+                if chat_id in chat_context_cache:
+                    cache_entry = chat_context_cache[chat_id]
+                    # Usa la cache se è stata aggiornata negli ultimi 5 minuti
+                    if (datetime.now() - cache_entry["last_update"]).total_seconds() < 300:
+                        cached_context = cache_entry["context"]
+                        print(f"Usando contesto cached (aggiornato {(datetime.now() - cache_entry['last_update']).total_seconds():.1f} secondi fa)")
+                
                 # Analizza la cronologia per trovare informazioni rilevanti
                 print(f"Analisi di {len(chat_history)} messaggi nella chat per contesto...")
                 history_analysis = None
@@ -300,8 +355,15 @@ def handle_message(message):
                     history_analysis = ai_service.analyze_message_history(chat_history, prompt)
                     print(f"Contesto rilevante trovato: {history_analysis[:100]}...")
                 
+                # Combina il contesto memorizzato con l'analisi specifica della query
+                combined_context = ""
+                if cached_context and cached_context != "Nessuna informazione rilevante trovata.":
+                    combined_context += f"CONTESTO GENERALE DELLA CHAT:\n{cached_context}\n\n"
+                if history_analysis and history_analysis != "Nessuna informazione rilevante trovata.":
+                    combined_context += f"INFORMAZIONI RILEVANTI PER LA DOMANDA ATTUALE:\n{history_analysis}"
+                
                 # Genera la risposta AI usando la cronologia come contesto aggiuntivo
-                response = ai_service.generate_ai_response(prompt if prompt else message.text, chat_id, user_info, history_analysis)
+                response = ai_service.generate_ai_response(prompt if prompt else message.text, chat_id, user_info, combined_context)
                 bot.reply_to(message, response)
             else:
                 print("Bot non menzionato in questo messaggio")
