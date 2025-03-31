@@ -61,6 +61,9 @@ class AIService:
                 current_date = datetime.now().strftime("%d %B %Y")
                 system_message = f"Sei un assistente AI italiano molto intelligente, utile e preciso. Oggi è {current_date}, siamo nel 2025. Rispondi sempre in italiano."
             
+            # Aggiungi istruzioni per risposte fattuali
+            system_message = system_message + "\n\nIMPORTANTE: Fornisci solo informazioni fattuali e verificabili. Se non conosci la risposta o non sei sicuro, ammettilo chiaramente dicendo 'Non ho informazioni sufficienti su questo' invece di inventare dettagli. Evita speculazioni e sii conciso nelle tue risposte."
+            
             payload_messages = [{"role": "system", "content": system_message}]
             payload_messages.extend(messages)
             
@@ -69,8 +72,9 @@ class AIService:
                 "messages": payload_messages,
                 "stream": False,
                 "options": {
-                    "temperature": 0.7,
-                    "num_predict": 500
+                    "temperature": 0.3,  # Ridotta da 0.7 a 0.3 per risposte più conservative
+                    "num_predict": 300,  # Ridotta da 500 a 300 per risposte più concise
+                    "top_p": 0.8        # Aggiunto per ridurre la creatività
                 }
             }
             
@@ -129,7 +133,7 @@ class AIService:
         """Analizza la cronologia dei messaggi della chat per trovare contenuti rilevanti"""
         try:
             # Limita a 50 messaggi più recenti per non sovraccaricare il modello
-            recent_messages = chat_messages[-500:] if len(chat_messages) > 500 else chat_messages
+            recent_messages = chat_messages[-50:] if len(chat_messages) > 50 else chat_messages
             
             # Costruisci la rappresentazione della cronologia
             messages_text = []
@@ -139,16 +143,15 @@ class AIService:
             messages_history = "\n".join(messages_text)
             
             prompt = f"""
-            Analizza questa cronologia di messaggi della chat e trova informazioni rilevanti per rispondere al messaggio attuale: "{current_topic}".
+            Analizza questa cronologia di messaggi della chat e trova SOLO informazioni FATTUALI e VERIFICABILI che sono rilevanti per rispondere al messaggio attuale: "{current_topic}".
             
             Cronologia della chat:
             {messages_history}
             
-            Fornisci un riassunto (massimo 200 parole) delle informazioni rilevanti dalla cronologia che possono aiutare a rispondere al messaggio attuale.
-            Ricorda di considerare chi ha detto cosa e di mantenere il contesto delle conversazioni tra i diversi utenti.
-            Identifica eventuali argomenti di discussione, opinioni diverse, e informazioni condivise rilevanti per l'argomento attuale.
+            Fornisci un breve riassunto (massimo 100 parole) delle informazioni FATTUALI trovate nella cronologia che possono aiutare a rispondere al messaggio attuale.
+            Non inserire interpretazioni o speculazioni, solo fatti menzionati esplicitamente nei messaggi.
             
-            Se non ci sono informazioni rilevanti, rispondi con "Nessuna informazione rilevante trovata."
+            Se non ci sono informazioni fattuali e verificabili rilevanti, rispondi con "Nessuna informazione rilevante trovata."
             """
             
             payload = {
