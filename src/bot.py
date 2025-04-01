@@ -326,6 +326,46 @@ def toggle_cattivo_mode(message):
     else:
         bot.reply_to(message, "Modalità cattiva disattivata. Torno ad essere gentile. 🙂")
 
+@bot.message_handler(commands=['ripara_contesto'])
+def repair_context(message):
+    """Ripara il contesto della chat per migliorare la distinzione tra messaggi"""
+    if message.from_user.id in [7905022928]:  # Sostituisci con l'ID dell'amministratore
+        chat_id = message.chat.id
+        bot.reply_to(message, "🔄 Rigenerazione del contesto in corso...")
+        
+        try:
+            # Ottieni la cronologia completa
+            chat_history = logger.get_chat_message_history(chat_id)
+            
+            if not chat_history:
+                bot.reply_to(message, "❌ Nessuna cronologia disponibile per questa chat")
+                return
+                
+            # Get bot's username
+            bot_info = bot.get_me()
+            bot_username = f"@{bot_info.username}"
+            
+            # Rigenerazione del contesto con il nuovo metodo
+            context_analysis = ai_service.analyze_chat_context_with_focus(chat_history, bot_username)
+            
+            # Salva il nuovo contesto
+            chat_context_cache[chat_id] = {
+                "last_update": datetime.now(),
+                "context": context_analysis,
+                "message_count": len(chat_history)
+            }
+            
+            # Salva su file
+            with open(f"data/context_cache_{chat_id}.txt", "w", encoding="utf-8") as f:
+                f.write(context_analysis)
+                
+            bot.reply_to(message, "✅ Contesto rigenerato con successo!")
+            
+        except Exception as e:
+            bot.reply_to(message, f"❌ Errore durante la rigenerazione: {str(e)}")
+    else:
+        bot.reply_to(message, "⛔ Solo gli amministratori possono usare questo comando")
+
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
@@ -340,7 +380,7 @@ def handle_message(message):
         user_id = message.from_user.id
         chat_id = message.chat.id
         
-        # Memorizza info utente
+        # Aggiorna o salva dati utente e conversazione come prima
         user_info = {
             'id': user_id,
             'first_name': message.from_user.first_name,
@@ -348,131 +388,69 @@ def handle_message(message):
             'username': message.from_user.username if message.from_user.username else ""
         }
         
-        # Aggiorna o salva dati utente
         if chat_id not in user_data:
             user_data[chat_id] = {}
         
-        # Se l'utente esiste già, preserviamo il carattere esistente
         if user_id in user_data[chat_id] and 'carattere' in user_data[chat_id][user_id]:
             user_info['carattere'] = user_data[chat_id][user_id]['carattere']
         
-        # Aggiorniamo i dati dell'utente
         user_data[chat_id][user_id] = user_info
         
-        # Recupera la cronologia della conversazione
         if chat_id not in conversation_history:
             conversation_history[chat_id] = []
         
-        # Aggiungi il messaggio alla cronologia con info utente
         if message.text:
             user_message = {"role": "user", "content": message.text, "user_info": user_info}
             conversation_history[chat_id].append(user_message)
         
-        # Limita la cronologia a 100 messaggi
         if len(conversation_history[chat_id]) > 100:
             conversation_history[chat_id] = conversation_history[chat_id][-100:]
         
-        # Lista di parole chiave da monitorare
-        keywords = ["gaetano", "gae", "gboipelo"]
+        # Get bot's username
+        bot_info = bot.get_me()
+        bot_username = f"@{bot_info.username}"
         
-        # Check if the bot is in a group chat
-        if message.chat.type in ["group", "supergroup"] and message.text:
-            # Controlla se il messaggio contiene una delle parole chiave (case insensitive)
-            lower_text = message.text.lower()
-            contains_keyword = any(keyword in lower_text for keyword in keywords)
+        # Determina se il messaggio è diretto al bot
+        is_directed_to_bot = (
+            message.chat.type == "private" or
+            (message.text and bot_username in message.text) or
+            (message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id)
+        )
+        
+        # Continua solo se il messaggio è diretto al bot
+        if is_directed_to_bot and message.text:
+            # Rimuovi il nome del bot dal messaggio se presente
+            clean_message = message.text.replace(bot_username, "").strip()
+            if not clean_message:
+                clean_message = message.text
             
-            if contains_keyword:
-                print("Parola chiave rilevata! Rispondendo con messaggio speciale...")
-                bot.reply_to(message, "Gae scem8")
-                return
+            # Ottieni informazioni di contesto
+            chat_history = []
+            history_analysis = "Nessuna informazione rilevante trovata."
             
-            # Get bot's username
-            bot_info = bot.get_me()
-            bot_username = bot_info.username
-            print(f"Username del bot: {bot_username}")
-            
-            # Verifica sia per @username che per menzioni dirette
-            is_mentioned = False
-            if message.text and f"@{bot_username}" in message.text:
-                is_mentioned = True
-                print("Bot menzionato tramite @username")
-            elif message.reply_to_message and message.reply_to_message.from_user and message.reply_to_message.from_user.id == bot.get_me().id:
-                is_mentioned = True
-                print("Bot menzionato tramite risposta diretta")
-                
-            if is_mentioned:
-                print(f"Bot menzionato! Elaborazione risposta...")
-                # Rimuovi la menzione dal prompt
-                prompt = message.text.replace(f"@{bot_username}", "").strip() if message.text else ""
-                
-                # Invia l'azione "sta scrivendo..."
-                bot.send_chat_action(message.chat.id, 'typing')
-                
-                # Recupera la cronologia messaggi dell'intera chat
-                print(f"Recupero della cronologia messaggi della chat {message.chat.id}...")
-                chat_history = logger.get_chat_message_history(chat_id)
-                
-                # Usa il contesto memorizzato se disponibile e aggiornato
-                cached_context = None
-                if chat_id in chat_context_cache:
-                    cache_entry = chat_context_cache[chat_id]
-                    # Usa la cache se è stata aggiornata negli ultimi 5 minuti
-                    if (datetime.now() - cache_entry["last_update"]).total_seconds() < 300:
-                        cached_context = cache_entry["context"]
-                        print(f"Usando contesto cached (aggiornato {(datetime.now() - cache_entry['last_update']).total_seconds():.1f} secondi fa)")
-                
-                # Analizza la cronologia per trovare informazioni rilevanti
-                print(f"Analisi di {len(chat_history)} messaggi nella chat per contesto...")
-                history_analysis = None
-                if chat_history and message.text:
-                    # Usa il testo del messaggio come argomento corrente
-                    history_analysis = ai_service.analyze_message_history(chat_history, prompt)
-                    print(f"Contesto rilevante trovato: {history_analysis[:100]}...")
-                
-                # Combina il contesto memorizzato con l'analisi specifica della query
-                combined_context = ""
-                if cached_context and cached_context != "Nessuna informazione rilevante trovata.":
-                    combined_context += f"CONTESTO GENERALE DELLA CHAT:\n{cached_context}\n\n"
-                if history_analysis and history_analysis != "Nessuna informazione rilevante trovata.":
-                    combined_context += f"INFORMAZIONI RILEVANTI PER LA DOMANDA ATTUALE:\n{history_analysis}"
-                
-                # Genera la risposta AI usando la cronologia come contesto aggiuntivo
-                response = ai_service.generate_ai_response(
-                    prompt if prompt else message.text, 
-                    chat_id, 
-                    user_info, 
-                    combined_context,
-                    is_cattivo=cattivo_mode.get(chat_id, False)
-                )
-                bot.reply_to(message, response)
+            # Scegli il metodo appropriato per ottenere il contesto
+            if chat_id in chat_context_cache:
+                history_analysis = chat_context_cache[chat_id]["context"]
+                print(f"Usando contesto memorizzato: {history_analysis[:50]}...")
             else:
-                print("Bot non menzionato in questo messaggio")
-        elif message.chat.type == "private":
-            # In private chats, respond to all messages
-            print("Chat privata, rispondo a tutti i messaggi")
-            # Invia l'azione "sta scrivendo..."
-            bot.send_chat_action(message.chat.id, 'typing')
-            
-            # Recupera la cronologia messaggi dell'intera chat
-            print(f"Recupero della cronologia messaggi della chat {message.chat.id}...")
-            chat_history = logger.get_chat_message_history(chat_id)
-            
-            # Analizza la cronologia per trovare informazioni rilevanti
-            print(f"Analisi di {len(chat_history)} messaggi nella chat per contesto...")
-            history_analysis = None
-            if chat_history and message.text:
-                # Usa il testo del messaggio come argomento corrente
-                history_analysis = ai_service.analyze_message_history(chat_history, message.text)
-                print(f"Contesto rilevante trovato: {history_analysis[:100]}...")
+                chat_history = logger.get_chat_message_history(chat_id)
+                if chat_history:
+                    # Usa il metodo che chiaramente distingue messaggi per il bot
+                    history_analysis = ai_service.analyze_message_history_with_focus(
+                        chat_history, clean_message, bot_username
+                    )
+                    print(f"Contesto rilevante trovato: {history_analysis[:100]}...")
             
             response = ai_service.generate_ai_response(
-                message.text, 
+                clean_message,
                 chat_id, 
                 user_info, 
                 history_analysis,
+                is_directed=True,  # Parametro nuovo
                 is_cattivo=cattivo_mode.get(chat_id, False)
             )
             bot.reply_to(message, response)
+            
     except Exception as e:
         print(f"Errore durante l'elaborazione del messaggio: {e}")
         try:

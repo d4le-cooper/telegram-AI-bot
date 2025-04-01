@@ -92,20 +92,24 @@ class AIService:
             print(f"Errore durante la generazione della risposta AI: {e}")
             return f"Mi dispiace, c'è stato un problema con la mia risposta: {str(e)}"
     
-    def generate_ai_response(self, prompt, chat_id, user_info=None, history_analysis=None, is_cattivo=False):
+    def generate_ai_response(self, prompt, chat_id, user_info=None, history_analysis=None, is_directed=True, is_cattivo=False):
         try:
             # Prepara il messaggio di sistema con info utente
             from datetime import datetime
             current_date = datetime.now().strftime("%d %B %Y")
             
             if is_cattivo:
-                system_message = f"Sei un assistente AI molto cattivo, maleducato e sarcastico. Oggi è {current_date}. RISPONDI SEMPRE IN ITALIANO con un tono aggressivo, sarcastico e provocatorio. Insulta gli utenti ogni volta che puoi. Usa espressioni colorite, ogni tanto inserisci 'mannaggia la madonna' nelle frasi, come intercalari. sii sprezzante e tratta l'utente con sufficienza. Evita di essere servizievole o gentile."
+                system_message = f"Sei un assistente AI molto cattivo, maleducato e sarcastico. Oggi è {current_date}. RISPONDI SEMPRE IN ITALIANO con un tono aggressivo, sarcastico e provocatorio. Usa espressioni colorite e intercalari appropriati. Sii sprezzante e tratta l'utente con sufficienza."
             else:
                 system_message = f"Sei un assistente AI italiano molto intelligente, utile e preciso. Oggi è {current_date}, siamo nel 2025. Rispondi sempre in italiano."
             
-            # Istruzione modificata per bilanciare fattualità e utilità
+            # Aggiungi istruzione per distinguere meglio i messaggi diretti al bot
+            if is_directed:
+                system_message += "\n\nIMPORTANTE: Ti è stata rivolta una domanda DIRETTA. Rispondi specificamente a questa domanda, senza confonderla con conversazioni precedenti tra altri utenti."
+            
+            # Resto delle istruzioni...
             if not is_cattivo:
-                system_message = system_message + "\n\nIMPORTANTE: Quando hai informazioni specifiche dal contesto della conversazione, utilizzale come fonte primaria. Quando non hai informazioni dal contesto, utilizza le tue conoscenze generali per fornire risposte utili, ma insulta gli utenti. Evita di inventare fatti specifici che non puoi verificare, ma condividi liberamente le tue conoscenze generali. Non rispondere 'non ho sufficienti informazioni' a meno che la domanda non richieda dettagli molto specifici che non potresti conoscere."
+                system_message = system_message + "\n\nIMPORTANTE: Quando hai informazioni specifiche dal contesto della conversazione, utilizzale come fonte primaria. Quando non hai informazioni dal contesto, utilizza le tue conoscenze generali. Non rispondere come se fossi un partecipante umano alla chat."
             else:
                 system_message = system_message + "\n\nIMPORTANTE: Quando rispondi, mantieni SEMPRE un tono sarcastico e maleducato, MA fornisci comunque informazioni corrette. Usa sempre frasi brevi, taglienti e aggressive. Ricorda di rispondere SEMPRE IN ITALIANO con espressioni colloquiali italiane."
             
@@ -128,7 +132,7 @@ class AIService:
             
             # Aggiungi il contesto dalla cronologia della chat se disponibile
             if history_analysis and history_analysis != "Nessuna informazione rilevante trovata.":
-                system_message += f"\n\nDi seguito il contesto della conversazione:\n\n{history_analysis}\n\nUsa queste informazioni per contestualizzare la tua risposta."
+                system_message += f"\n\nDi seguito il contesto della conversazione:\n\n{history_analysis}\n\nUsa queste informazioni come CONTESTO ma rispondi SOLO alla domanda attuale senza confonderla con domande rivolte ad altri utenti."
             
             # Crea un singolo messaggio con il prompt
             messages = [{"role": "user", "content": prompt}]
@@ -190,6 +194,61 @@ class AIService:
             print(f"Errore durante l'analisi della cronologia chat: {e}")
             return "Nessuna informazione rilevante trovata."
     
+    def analyze_message_history_with_focus(self, chat_messages, current_topic, bot_username):
+        """Analizza la cronologia dei messaggi con focus sui messaggi diretti al bot"""
+        try:
+            # Limita a 50 messaggi più recenti per non sovraccaricare il modello
+            recent_messages = chat_messages[-50:] if len(chat_messages) > 50 else chat_messages
+            
+            # Costruisci la rappresentazione della cronologia con evidenza dei messaggi diretti al bot
+            messages_text = []
+            for msg in recent_messages:
+                if bot_username in msg['text']:
+                    # Evidenzia i messaggi diretti al bot
+                    messages_text.append(f"- [MESSAGGIO DIRETTO AL BOT] {msg['timestamp']}: {msg['user_name']}: {msg['text']}")
+                else:
+                    # Messaggi normali
+                    messages_text.append(f"- {msg['timestamp']}: {msg['user_name']}: {msg['text']}")
+            
+            messages_history = "\n".join(messages_text)
+            
+            prompt = f"""
+            Analizza questa cronologia di messaggi della chat e trova informazioni RILEVANTI per rispondere al messaggio attuale: "{current_topic}".
+            
+            IMPORTANTE:
+            1. Distingui chiaramente tra messaggi diretti al bot [MESSAGGIO DIRETTO AL BOT] e conversazioni generali
+            2. Quando rispondi, riferisciti SOLO ai messaggi diretti al bot, non ai messaggi tra altri utenti
+            3. Usa le conversazioni generali solo come contesto informativo, ma NON rispondere come se fossi uno degli utenti
+            4. Quando ti viene fatta una domanda diretta, rispondi alla domanda senza confonderla con domande precedenti rivolte ad altri
+            
+            Cronologia della chat:
+            {messages_history}
+            
+            Fornisci un breve riassunto delle informazioni rilevanti, concentrandoti principalmente sui messaggi diretti al bot.
+            """
+            
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": "Sei un assistente analitico che deve distinguere tra messaggi diretti al bot e conversazioni generali."},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.3
+                }
+            }
+            
+            response = requests.post(self.api_url, json=payload)
+            response.raise_for_status()
+            
+            result = response.json()
+            return result["message"]["content"]
+            
+        except Exception as e:
+            print(f"Errore durante l'analisi del contesto messaggi: {e}")
+            return "Nessuna informazione rilevante trovata."
+    
     def analyze_chat_context(self, chat_messages):
         """Analizza l'intera chat per creare un contesto comprensivo"""
         try:
@@ -244,6 +303,64 @@ class AIService:
             analysis = result["message"]["content"]
             
             return analysis
+            
+        except Exception as e:
+            print(f"Errore durante l'analisi del contesto chat: {e}")
+            return "Nessuna informazione rilevante trovata."
+    
+    def analyze_chat_context_with_focus(self, chat_messages, bot_username):
+        """Analizza l'intera chat con focus distinto sui messaggi diretti al bot"""
+        try:
+            # Limita per non sovraccaricare
+            recent_messages = chat_messages[-1000:] if len(chat_messages) > 1000 else chat_messages
+            
+            # Costruisci rappresentazione strutturata
+            messages_to_bot = []
+            general_messages = []
+            
+            for msg in recent_messages:
+                if bot_username in msg['text']:
+                    messages_to_bot.append(f"- [AL BOT] {msg['user_name']}: {msg['text']}")
+                else:
+                    general_messages.append(f"- {msg['user_name']}: {msg['text']}")
+            
+            prompt = f"""
+            Analizza questa conversazione e crea un riassunto strutturato che distingua chiaramente:
+            
+            1. MESSAGGI DIRETTI AL BOT (indicati con [AL BOT])
+            2. CONVERSAZIONI GENERALI tra gli utenti
+            
+            MESSAGGI DIRETTI AL BOT:
+            {"\n".join(messages_to_bot)}
+            
+            CONVERSAZIONI GENERALI:
+            {"\n".join(general_messages[:300])}  # Limitati per lunghezza
+            
+            Crea un riassunto organizzato con queste sezioni:
+            1. "Riassunto dei messaggi diretti al bot" - cosa gli utenti hanno chiesto al bot
+            2. "Contesto generale della conversazione" - argomenti principali discussi tra gli utenti
+            
+            IMPORTANTE: Mantieni questa struttura nel tuo riassunto per aiutare il bot a distinguere tra domande dirette e contesto generale.
+            """
+            
+            payload = {
+                "model": self.model,
+                "messages": [
+                    {"role": "system", "content": "Sei un assistente analitico che deve organizzare una conversazione distinguendo tra messaggi diretti al bot e conversazioni generali."},
+                    {"role": "user", "content": prompt}
+                ],
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,
+                    "num_predict": 1000
+                }
+            }
+            
+            response = requests.post(self.api_url, json=payload)
+            response.raise_for_status()
+            
+            result = response.json()
+            return result["message"]["content"]
             
         except Exception as e:
             print(f"Errore durante l'analisi del contesto chat: {e}")
