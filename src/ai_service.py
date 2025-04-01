@@ -1,13 +1,41 @@
 import requests
 import json
 import os
+import random
 
 class AIService:
     def __init__(self, model="llama3", api_url="http://localhost:11434/api/chat", log_dir="./logs"):
         self.model = model
         self.api_url = api_url
-        self.log_dir = log_dir
-    
+        
+        # Carica gli intercalari e gli appellativi
+        self.intercalari_cattivo = self._load_data_file("data/intercalari_cattivo.json", [])
+        self.intercalari_non_cattivo = self._load_data_file("data/intercalari_non_cattivo.json", [])
+        self.appellativi_cattivo = self._load_data_file("data/appellativi_cattivo.json", [])
+        self.appellativi_non_cattivo = self._load_data_file("data/appellativi_non_cattivo.json", [])
+        
+        print(f"Caricati {len(self.intercalari_cattivo)} intercalari cattivi e {len(self.intercalari_non_cattivo)} intercalari non cattivi")
+        print(f"Caricati {len(self.appellativi_cattivo)} appellativi cattivi e {len(self.appellativi_non_cattivo)} appellativi non cattivi")
+        print(f"Intercalari cattivi: {self.intercalari_cattivo}")
+        print(f"Intercalari non cattivi: {self.intercalari_non_cattivo}")
+        print(f"Appellativi cattivi: {self.appellativi_cattivo}")
+        print(f"Appellativi non cattivi: {self.appellativi_non_cattivo}")
+
+    def _load_data_file(self, filepath, default_value):
+        """Carica un file JSON e restituisce il contenuto"""
+        try:
+            if os.path.exists(filepath):
+                with open(filepath, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            print(f"⚠️ File {filepath} non trovato. Uso valore predefinito.")
+            return default_value
+        except json.JSONDecodeError as e:
+            print(f"❌ Errore nel parsing del file {filepath}: {e}")
+            return default_value
+        except Exception as e:
+            print(f"❌ Errore nel caricamento del file {filepath}: {e}")
+            return default_value
+
     def analyze_user_character(self, user_messages):
         """Analizza il carattere dell'utente basandosi sui suoi messaggi"""
         try:
@@ -39,9 +67,12 @@ class AIService:
                 }
             }
             
+            print(f"Payload inviato: {payload}")
+            
             # Effettua la chiamata API a Ollama locale
             response = requests.post(self.api_url, json=payload)
             response.raise_for_status()
+            print(f"Risposta ricevuta: {response.json()}")
             
             # Estrai la risposta
             result = response.json()
@@ -78,9 +109,12 @@ class AIService:
                 }
             }
             
+            print(f"Payload inviato: {payload}")
+            
             # Effettua la chiamata API a Ollama locale
             response = requests.post(self.api_url, json=payload)
             response.raise_for_status()
+            print(f"Risposta ricevuta: {response.json()}")
             
             # Estrai la risposta
             result = response.json()
@@ -94,48 +128,34 @@ class AIService:
     
     def generate_ai_response(self, prompt, chat_id, user_info=None, history_analysis=None, is_directed=True, is_cattivo=False):
         try:
-            # Prepara il messaggio di sistema con info utente
             from datetime import datetime
             current_date = datetime.now().strftime("%d %B %Y")
             
+            # Seleziona intercalari e appellativi in base alla modalità
             if is_cattivo:
-                system_message = f"Sei un assistente AI molto cattivo, maleducato e sarcastico. Oggi è {current_date}. RISPONDI SEMPRE IN ITALIANO con un tono aggressivo, sarcastico e provocatorio. Usa espressioni colorite e intercalari appropriati. Sii sprezzante e tratta l'utente con sufficienza."
+                intercalare = random.choice(self.intercalari_cattivo) if self.intercalari_cattivo else "mannaggia"
+                appellativo = random.choice(self.appellativi_cattivo) if self.appellativi_cattivo else "genio"
+                print(f"Modalità cattivo: intercalare='{intercalare}', appellativo='{appellativo}'")
+                system_message = f"Sei un assistente AI molto cattivo, maleducato e sarcastico. Oggi è {current_date}. Usa espressioni come '{intercalare}' e chiama l'utente '{appellativo}' in modo sarcastico."
             else:
-                system_message = f"Sei un assistente AI italiano molto intelligente, utile e preciso. Oggi è {current_date}, siamo nel 2025. Rispondi sempre in italiano."
+                intercalare = random.choice(self.intercalari_non_cattivo) if self.intercalari_non_cattivo else "oh cielo"
+                appellativo = random.choice(self.appellativi_non_cattivo) if self.appellativi_non_cattivo else "amico"
+                print(f"Modalità non cattivo: intercalare='{intercalare}', appellativo='{appellativo}'")
+                system_message = f"Sei un assistente AI gentile e rispettoso. Oggi è {current_date}. Usa espressioni come '{intercalare}' e chiama l'utente '{appellativo}' in modo amichevole."
             
-            # Aggiungi istruzione per distinguere meglio i messaggi diretti al bot
+            # Aggiungi istruzioni per distinguere meglio i messaggi diretti al bot
             if is_directed:
-                system_message += "\n\nIMPORTANTE: Ti è stata rivolta una domanda DIRETTA. Rispondi specificamente a questa domanda, senza confonderla con conversazioni precedenti tra altri utenti."
-            
-            # Resto delle istruzioni...
-            if not is_cattivo:
-                system_message = system_message + "\n\nIMPORTANTE: Quando hai informazioni specifiche dal contesto della conversazione, utilizzale come fonte primaria. Quando non hai informazioni dal contesto, utilizza le tue conoscenze generali. Non rispondere come se fossi un partecipante umano alla chat."
-            else:
-                system_message = system_message + "\n\nIMPORTANTE: Quando rispondi, mantieni SEMPRE un tono sarcastico e maleducato, MA fornisci comunque informazioni corrette. Usa sempre frasi brevi, taglienti e aggressive. Ricorda di rispondere SEMPRE IN ITALIANO con espressioni colloquiali italiane."
-            
-            # Aggiungi info personalizzazione se disponibile
-            if user_info:
-                system_message += f"\n\nStai parlando con {user_info['first_name']}"
-                if user_info.get('username'):
-                    system_message += f" (@{user_info['username']})"
-                
-                # Aggiungi informazioni sul carattere dell'utente
-                if 'carattere' in user_info and user_info['carattere']:
-                    system_message += f". Questo utente ha il seguente carattere: {user_info['carattere']}."
-                    if is_cattivo:
-                        system_message += " Usa questo per prenderlo in giro e provocarlo."
-                    else:
-                        system_message += " Adatta il tuo tono e contenuto in base a questo carattere."
-                
-                if not is_cattivo:
-                    system_message += ". Personalizza le tue risposte in base a questo utente."
+                system_message += "\n\nIMPORTANTE: Rispondi specificamente alla domanda attuale senza confonderla con altre conversazioni."
             
             # Aggiungi il contesto dalla cronologia della chat se disponibile
             if history_analysis and history_analysis != "Nessuna informazione rilevante trovata.":
-                system_message += f"\n\nDi seguito il contesto della conversazione:\n\n{history_analysis}\n\nUsa queste informazioni come CONTESTO ma rispondi SOLO alla domanda attuale senza confonderla con domande rivolte ad altri utenti."
+                system_message += f"\n\nDi seguito il contesto della conversazione:\n\n{history_analysis}\n\nUsa queste informazioni per contestualizzare la tua risposta."
             
             # Crea un singolo messaggio con il prompt
             messages = [{"role": "user", "content": prompt}]
+            
+            # Log del payload
+            print(f"Payload inviato: {messages}")
             
             # Utilizziamo il metodo generate_response esistente
             return self.generate_response(messages, system_message)
@@ -180,9 +200,12 @@ class AIService:
                 }
             }
             
+            print(f"Payload inviato: {payload}")
+            
             # Effettua la chiamata API
             response = requests.post(self.api_url, json=payload)
             response.raise_for_status()
+            print(f"Risposta ricevuta: {response.json()}")
             
             # Estrai la risposta
             result = response.json()
@@ -239,8 +262,11 @@ class AIService:
                 }
             }
             
+            print(f"Payload inviato: {payload}")
+            
             response = requests.post(self.api_url, json=payload)
             response.raise_for_status()
+            print(f"Risposta ricevuta: {response.json()}")
             
             result = response.json()
             return result["message"]["content"]
@@ -294,9 +320,12 @@ class AIService:
                 }
             }
             
+            print(f"Payload inviato: {payload}")
+            
             # Effettua la chiamata API
             response = requests.post(self.api_url, json=payload)
             response.raise_for_status()
+            print(f"Risposta ricevuta: {response.json()}")
             
             # Estrai la risposta
             result = response.json()
@@ -355,7 +384,7 @@ class AIService:
                     "num_predict": 1000
                 }
             }
-            
+                        
             response = requests.post(self.api_url, json=payload)
             response.raise_for_status()
             

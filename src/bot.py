@@ -366,6 +366,27 @@ def repair_context(message):
     else:
         bot.reply_to(message, "⛔ Solo gli amministratori possono usare questo comando")
 
+@bot.message_handler(commands=['reload_files'])
+def reload_files(message):
+    """Ricarica i file di intercalari e appellativi"""
+    logger.log_message(message)
+    
+    # Verifica se l'utente è un amministratore
+    admin_ids = [7905022928]  # Sostituisci con gli ID degli admin
+    if message.from_user.id not in admin_ids:
+        bot.reply_to(message, "Non sei autorizzato a usare questo comando.")
+        return
+    
+    try:
+        ai_service.intercalari_cattivo = ai_service._load_data_file("data/intercalari_cattivo.json", [])
+        ai_service.intercalari_non_cattivo = ai_service._load_data_file("data/intercalari_non_cattivo.json", [])
+        ai_service.appellativi_cattivo = ai_service._load_data_file("data/appellativi_cattivo.json", [])
+        ai_service.appellativi_non_cattivo = ai_service._load_data_file("data/appellativi_non_cattivo.json", [])
+        
+        bot.reply_to(message, "✅ File ricaricati con successo!")
+    except Exception as e:
+        bot.reply_to(message, f"❌ Errore durante il ricaricamento dei file: {e}")
+
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
