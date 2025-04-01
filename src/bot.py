@@ -448,6 +448,26 @@ def handle_message(message):
         user_id = message.from_user.id
         chat_id = message.chat.id
         
+        # Get bot's username - SPOSTATO QUI IN ALTO
+        bot_info = bot.get_me()
+        bot_username = f"@{bot_info.username}"
+        
+        # INIZIO NUOVA FUNZIONALITÀ - Risposta ai nomi alternativi
+        # Lista di parole chiave che attivano la risposta speciale
+        trigger_words = ["gaetano", "gae", "gboipelo"]
+        
+        # Verifica se il messaggio contiene una delle parole chiave (case insensitive)
+        if message.text and any(word.lower() in message.text.lower() for word in trigger_words):
+            # Evita di rispondere ai propri messaggi o a comandi
+            if not message.text.startswith('/') and not message.from_user.is_bot:
+                bot.reply_to(message, "Gae scem8")
+                # Se è solo un trigger word senza richieste al bot, termina qui
+                if not (message.chat.type == "private" or 
+                       (bot_username.lower() in message.text.lower()) or
+                       (message.reply_to_message and message.reply_to_message.from_user.id == bot_info.id)):
+                    return
+        # FINE NUOVA FUNZIONALITÀ
+        
         # Aggiorna o salva dati utente e conversazione come prima
         user_info = {
             'id': user_id,
@@ -473,10 +493,6 @@ def handle_message(message):
         
         if len(conversation_history[chat_id]) > 100:
             conversation_history[chat_id] = conversation_history[chat_id][-100:]
-        
-        # Get bot's username
-        bot_info = bot.get_me()
-        bot_username = f"@{bot_info.username}"
         
         # Determina se il messaggio è diretto al bot
         is_directed_to_bot = (
