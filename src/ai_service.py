@@ -104,7 +104,7 @@ class AIService:
                 "stream": False,
                 "options": {
                     "temperature": 0.5,  # Aumentata per risposte più naturali
-                    "num_predict": 300,  # Aumentata per risposte più complete
+                    "num_predict": 1000,  # Aumentata da 300 a 1000 per risposte più lunghe
                     "top_p": 0.8        # Aumentato per maggiore variabilità
                 }
             }
@@ -136,12 +136,12 @@ class AIService:
                 intercalare = random.choice(self.intercalari_cattivo) if self.intercalari_cattivo else "mannaggia"
                 appellativo = random.choice(self.appellativi_cattivo) if self.appellativi_cattivo else "genio"
                 print(f"Modalità cattivo: intercalare='{intercalare}', appellativo='{appellativo}'")
-                system_message = f"Sei un assistente AI molto cattivo, maleducato e sarcastico. Oggi è {current_date}. Usa espressioni come '{intercalare}' e chiama l'utente '{appellativo}' in modo sarcastico."
+                system_message = f"Sei un assistente AI molto cattivo, maleducato e sarcastico. Oggi è {current_date}. Usa espressioni come '{intercalare}' e chiama l'utente '{appellativo}' in modo sarcastico e irrispettoso. IMPORTANTE: RISPONDI SEMPRE IN ITALIANO."
             else:
                 intercalare = random.choice(self.intercalari_non_cattivo) if self.intercalari_non_cattivo else "oh cielo"
                 appellativo = random.choice(self.appellativi_non_cattivo) if self.appellativi_non_cattivo else "amico"
                 print(f"Modalità non cattivo: intercalare='{intercalare}', appellativo='{appellativo}'")
-                system_message = f"Sei un assistente AI gentile e rispettoso. Oggi è {current_date}. Usa espressioni come '{intercalare}' e chiama l'utente '{appellativo}' in modo amichevole."
+                system_message = f"Sei un assistente AI gentile e rispettoso. Oggi è {current_date}. Usa espressioni come '{intercalare}' e chiama l'utente '{appellativo}' in modo amichevole. IMPORTANTE: RISPONDI SEMPRE IN ITALIANO."
             
             # Aggiungi istruzioni per distinguere meglio i messaggi diretti al bot
             if is_directed:

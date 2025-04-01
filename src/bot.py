@@ -387,6 +387,53 @@ def reload_files(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Errore durante il ricaricamento dei file: {e}")
 
+def send_long_message(chat_id, text, reply_to_message_id=None):
+    """Divide messaggi lunghi in parti per rispettare il limite di Telegram"""
+    MAX_MESSAGE_LENGTH = 4000  # Usando 4000 invece di 4096 per sicurezza
+    
+    if len(text) <= MAX_MESSAGE_LENGTH:
+        # Messaggio abbastanza corto, invialo normalmente
+        return bot.send_message(chat_id, text, reply_to_message_id=reply_to_message_id)
+    
+    # Dividi il messaggio in parti
+    parts = []
+    for i in range(0, len(text), MAX_MESSAGE_LENGTH):
+        part = text[i:i + MAX_MESSAGE_LENGTH]
+        
+        # Se non è la prima parte, cerca di dividere su un punto o uno spazio
+        if i > 0:
+            # Cerca l'ultimo punto o spazio nella parte
+            last_sentence_break = part.rfind('. ')
+            last_space = part.rfind(' ')
+            
+            split_point = max(last_sentence_break, last_space)
+            if split_point > MAX_MESSAGE_LENGTH // 2:  # Solo se è abbastanza avanti
+                remaining = part[split_point+1:]
+                part = part[:split_point+1]
+                # Aggiungi il resto alla prossima parte
+                text = text[:i] + text[i:i+split_point+1] + text[i+split_point+1:]
+        
+        parts.append(part)
+    
+    # Invia ogni parte, numerandola
+    total_parts = len(parts)
+    last_message = None
+    
+    for idx, part in enumerate(parts):
+        if total_parts > 1:
+            part_header = f"[Parte {idx+1}/{total_parts}]\n\n"
+            message_text = part_header + part
+        else:
+            message_text = part
+        
+        # Solo il primo messaggio risponde al messaggio originale
+        if idx == 0 and reply_to_message_id:
+            last_message = bot.send_message(chat_id, message_text, reply_to_message_id=reply_to_message_id)
+        else:
+            last_message = bot.send_message(chat_id, message_text)
+    
+    return last_message
+
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     try:
@@ -470,7 +517,9 @@ def handle_message(message):
                 is_directed=True,  # Parametro nuovo
                 is_cattivo=cattivo_mode.get(chat_id, False)
             )
-            bot.reply_to(message, response)
+            
+            # Usa la nuova funzione per inviare messaggi lunghi
+            send_long_message(chat_id, response, message.message_id)
             
     except Exception as e:
         print(f"Errore durante l'elaborazione del messaggio: {e}")
